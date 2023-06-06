@@ -1,0 +1,89 @@
+---
+title: "Creating Dotplot"
+author: "Abinet Joan"
+date: "2023-05-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+suppressMessages(library(ggplot2))
+suppressMessages(library("forcats"))
+```
+
+# The tsv files have to be modified in order to plot the corret data
+```{r}
+modify_GSEA_data <- function(GSEA_results){
+  GSEA_results<- GSEA_results[order(GSEA_results$NES, decreasing = T),]
+  
+  GSEA_results$NAME <- gsub("_", " ", GSEA_results$NAME)
+  
+  GSEA_results
+}
+```
+
+```{r}
+# loading table
+dir <- "/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/spatial_transcriptomic/GSEA/output/périvvsintra/"
+# BP
+GSEA_BP_res <- read.table(paste0(dir,"my_analysis.Gsea.1684311691666_BP2/gsea_report_for_perilesional_1684311691666.tsv"), header = T, sep = "\t")
+GSEA_BP_res <- modify_GSEA_data(GSEA_BP_res)
+GSEA_BP_res <- GSEA_BP_res[c(6,9,12,16,20,28,53),]
+
+# MF
+GSEA_MF_res <- read.table(paste0(dir,"my_analysis.Gsea.1684310907505_MF/gsea_report_for_perilesional_1684310907505.tsv"), header = T, sep = "\t")
+GSEA_MF_res <- modify_GSEA_data(GSEA_MF_res)
+GSEA_MF_res <- GSEA_MF_res[c(3,11),]
+
+# CC
+GSEA_CC_res <- read.table(paste0(dir,"my_analysis.Gsea.1684311503281_CC/gsea_report_for_perilesional_1684311503281.tsv"), header = T, sep = "\t")
+GSEA_CC_res <- modify_GSEA_data(GSEA_CC_res)
+GSEA_CC_res <- GSEA_CC_res[c(1,10,14,18),]
+
+GSEA_Data <- rbind(GSEA_MF_res, GSEA_CC_res, GSEA_BP_res)
+GSEA_Data <- GSEA_Data[order(GSEA_Data$NES, decreasing = F),]
+row.names(GSEA_Data) <- NULL
+
+# define the column has a factor so that the order of Ontology is maintain in the plot.
+GSEA_Data$NAME <- factor(GSEA_Data$NAME, levels = GSEA_Data$NAME)
+
+ggplot(GSEA_Data, aes(x = NES,y =NAME, size = SIZE, color = FDR.q.val)) + geom_point() + ggtitle("GSEA - Perilesional vs Intralesional") + scale_color_gradient(low = "red", high = "blue") + theme_bw()+ scale_size(range = c(3,10))
+ggsave("GSEA_PerivsIntra.pdf", width = 12, height = 8)
+```
+
+
+```{r}
+# loading table
+dir <- "/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/spatial_transcriptomic/GSEA/output/périvvsintra/"
+# BP
+GSEA_BP_res <- read.table(paste0(dir,"my_analysis.Gsea.1684311691666_BP2/gsea_report_for_intralesional_1684311691666.tsv"), header = T, sep = "\t")
+GSEA_BP_res <- modify_GSEA_data(GSEA_BP_res)
+GSEA_BP_res <- GSEA_BP_res[rev(rownames(GSEA_BP_res)),]
+GSEA_BP_res <- GSEA_BP_res[c(1,2,21,78),]
+
+# MF
+GSEA_MF_res <- read.table(paste0(dir,"my_analysis.Gsea.1684310907505_MF/gsea_report_for_intralesional_1684310907505.tsv"), header = T, sep = "\t")
+GSEA_MF_res <- modify_GSEA_data(GSEA_MF_res)
+GSEA_MF_res <- GSEA_MF_res[rev(rownames(GSEA_MF_res)),]
+GSEA_MF_res <- GSEA_MF_res[c(2,4,6),]
+
+# CC
+GSEA_CC_res <- read.table(paste0(dir,"my_analysis.Gsea.1684311503281_CC/gsea_report_for_intralesional_1684311503281.tsv"), header = T, sep = "\t")
+GSEA_CC_res <- modify_GSEA_data(GSEA_CC_res)
+GSEA_CC_res <- GSEA_CC_res[rev(rownames(GSEA_CC_res)),]
+GSEA_CC_res <- GSEA_CC_res[c(2,3,5,9),]
+
+GSEA_Data <- rbind(GSEA_MF_res, GSEA_CC_res, GSEA_BP_res)
+GSEA_Data <- GSEA_Data[order(GSEA_Data$NES, decreasing = F),]
+row.names(GSEA_Data) <- NULL
+
+# define the column has a factor so that the order of Ontology is maintain in the plot.
+GSEA_Data$NAME <- factor(GSEA_Data$NAME, levels = GSEA_Data$NAME)
+
+ggplot(GSEA_Data, aes(x = NES,y =NAME, size = SIZE, color = FDR.q.val)) + geom_point() + ggtitle("GSEA - Intralesional vs Perilesional") + scale_color_gradient(low = "red", high = "blue") + theme_bw()+ scale_size(range = c(3,10))
+ggsave("GSEA_IntravsPeri.pdf", width = 12, height = 8)
+```

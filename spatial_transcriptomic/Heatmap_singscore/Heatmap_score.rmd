@@ -1,0 +1,108 @@
+---
+title: "Heatmap personnal score"
+author: "Abinet Joan"
+date: "2023-05-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(readxl))
+suppressMessages(library("pheatmap"))
+suppressMessages(library("RColorBrewer"))
+suppressMessages(library(dichromat))
+```
+
+
+Attention ici code très mal fais, faudrait refaire ça avec les vrais nom des échantillons, faudrait juste partir de Q3 - publications (la version sans l'erreur). Ce serait alors beaucoup plus facile de garder les noms.
+
+# Loading data
+```{r pressure, echo=FALSE}
+Score_table <- read_excel("../Data_Thomas/202305_Resume.xlsx", sheet = "Sheet1", range = "B4:U28")
+```
+# adding ILC2
+```{r}
+scoring_ILC2 <- read.csv("../singscore_bis/score_ILC2.csv")
+scoring_ILC2$ROI <- gsub(".*\\|(.*?)\\|.*", "\\1", scoring_ILC2$Row.names)
+scoring_ILC2$ROI <- gsub("\\s+", "", scoring_ILC2$ROI)
+scoring_ILC2$ROI2 <- ifelse(substr(scoring_ILC2$Row.names, 13, 13) == "4", 1, ifelse(substr(scoring_ILC2$Row.names, 13, 13) == "8", 2, NA))
+
+scoring_ILC2$ROI <- paste(scoring_ILC2$ROI2, scoring_ILC2$ROI, sep = "_")
+```
+
+
+# Heatmap singscore
+```{r}
+singscores <- Score_table[,c(3,14, 15,16,17,18,19,20)]
+singscores <- as.data.frame(singscores)
+rownames(singscores)<- singscores$ROI
+singscores <- singscores[,-1]
+
+scoring_ILC2 <- scoring_ILC2[,c(3,5)]
+singscores <- merge(singscores, scoring_ILC2, by.x = 0, by.y = "ROI")
+rownames(singscores) <- singscores$Row.names
+singscores <- singscores[,-1]
+
+singscores <- singscores[order(singscores$`Assignment group`),]
+singscores$`Assignment group` <- NULL
+
+df <- as.data.frame(Score_table[,c(3,20)])
+rownames(df)<-df$ROI
+df$ROI <- NULL
+
+pheatmap_singscore<- pheatmap(t(singscores), cluster_rows=FALSE, show_rownames=T,
+         cluster_cols=F, scale = "row", annotation_col=df, main = "Singscores", labels_row = c("Ly6G Macs", "AM", "Neutro", "CD64⁺ Mono", "CD206⁻ IM", "CD206⁺ IM","ILC2" ), color = colorRampPalette(c("blue", "white", "red"))(100))
+
+save_pheatmap_pdf(pheatmap_singscore, "pheatmap_singscore.pdf", width = 15, height = 10)
+```
+
+# Heatmap module score
+```{r}
+singscores <- Score_table[,c(3,14, 15,16,17,18,19)]
+singscores <- as.data.frame(singscores)
+rownames(singscores)<- singscores$ROI
+singscores <- singscores[,-1]
+
+df <- as.data.frame(Score_table[,c(3,20)])
+rownames(df)<-df$ROI
+df$ROI <- NULL
+
+pheatmap(t(singscores), cluster_rows=FALSE, show_rownames=T,
+         cluster_cols=F, scale = "row", annotation_col=df, main = "Singscores", labels_row = c("Ly6G Macs", "AM", "Neutro", "CD64⁺ Mono", "CD206⁻ IM", "CD206⁺ IM") )
+```
+
+
+# Heatmap AT1 -> AT2 : code trop compliqué  modifier
+```{r}
+score_epi <- read.csv("../Scoring_cells_Part2/Score_epi.csv")
+score_epi <- as.data.frame(score_epi)
+rownames(score_epi)<- score_epi$ROI
+score_epi <- score_epi[,-c(1,2)]
+
+score_epi$ROI <- gsub(".*\\|(.*?)\\|.*", "\\1", rownames(score_epi))
+score_epi$ROI <- gsub("\\s+", "", score_epi$ROI)
+score_epi$ROI2 <- ifelse(substr(rownames(score_epi), 13, 13) == "4", 1, ifelse(substr(rownames(score_epi), 13, 13) == "8", 2, NA))
+score_epi$ROI <- paste(score_epi$ROI2, score_epi$ROI, sep = "_")
+
+rownames(score_epi) <- score_epi$ROI
+score_epi$ROI <- NULL
+score_epi$ROI2 <- NULL
+
+score_epi <- score_epi[,c("AT1", "DATP", "PrimedAT2", "AT2")]
+
+df <- as.data.frame(Score_table[,c(3,20)])
+rownames(df)<-df$ROI
+df$ROI <- NULL
+
+
+pheatmap_singscore<- pheatmap(t(score_epi), cluster_rows=FALSE, show_rownames=T, color = colorRampPalette(c("blue", "white", "red"))(100), cluster_cols=F, scale = "row", annotation_col=df, main = "Singscores")
+
+save_pheatmap_pdf(pheatmap_singscore, "pheatmap_singscore_epi.pdf", width = 15, height = 6)
+```
+

@@ -1,0 +1,196 @@
+---
+title: "Differentiation DATPs => AT1"
+author: "Abinet Joan"
+date: "2/6/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(nichenetr))
+suppressMessages(library(tidyverse))
+```
+
+
+# Loading epithelial cells (receivers)
+```{r}
+path <- "/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/Epithelial_cells/"
+epithelial_cells <- readRDS(paste(path,"epithelial_cells.rds", sep = ""))
+
+DimPlot(epithelial_cells, reduction = "umap", label = T)
+```
+
+# loading motro cells (Senders)
+```{r}
+path<-"/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/"
+myeloid_cells_clustered <- readRDS(paste(path,"1PreProcessing_Clustering/Myeloid_cells_Part2.rds", sep = ""))
+
+DimPlot(myeloid_cells_clustered, reduction = "umap", label = T, group.by = "CellType")
+#ggsave("plot_Part2/Umap_myeloid_cells.png", height = 7, width = 12)
+
+DefaultAssay(myeloid_cells_clustered) <- "RNA" # important
+```
+
+# Read in NicheNet’s ligand-target prior model, ligand-receptor network and weighted integrated networks:
+```{r}
+ligand_target_matrix = readRDS(url("https://zenodo.org/record/3260758/files/ligand_target_matrix.rds"))
+lr_network = readRDS(url("https://zenodo.org/record/3260758/files/lr_network.rds"))
+weighted_networks = readRDS(url("https://zenodo.org/record/3260758/files/weighted_networks.rds"))
+
+weighted_networks_lr = weighted_networks$lr_sig %>% inner_join(lr_network %>% distinct(from,to), by = c("from","to"))
+```
+
+
+# convert the NicheNet network gene symbols from human to mouse based on one-to-one orthology
+```{r}
+lr_network = lr_network %>% mutate(from = convert_human_to_mouse_symbols(from), to = convert_human_to_mouse_symbols(to)) %>% drop_na()
+colnames(ligand_target_matrix) = ligand_target_matrix %>% colnames() %>% convert_human_to_mouse_symbols()
+rownames(ligand_target_matrix) = ligand_target_matrix %>% rownames() %>% convert_human_to_mouse_symbols()
+
+ligand_target_matrix = ligand_target_matrix %>% .[!is.na(rownames(ligand_target_matrix)), !is.na(colnames(ligand_target_matrix))]
+weighted_networks_lr = weighted_networks_lr %>% mutate(from = convert_human_to_mouse_symbols(from), to = convert_human_to_mouse_symbols(to)) %>% drop_na()
+```
+
+# 1. Define a “sender/niche” cell population and a “receiver/target” cell population in your expression data,  determine which genes are expressed in both populations
+```{r}
+## receivers
+receiver_celltypes <-c("4","5")
+
+# select all genes expressed by at least 10% of the cells.
+list_expressed_genes_receiver = receiver_celltypes %>% unique() %>% lapply(get_expressed_genes, epithelial_cells, 0.10, "RNA") # lapply to get the expressed genes of every sender cell type separately here
+expressed_genes_receiver = list_expressed_genes_receiver %>% unlist() %>% unique()
+
+length(expressed_genes_receiver) # 6333 gènes sélectionner
+background_expressed_genes = expressed_genes_receiver %>% .[. %in% rownames(ligand_target_matrix)]
+```
+
+# Senders genes
+```{r}
+## senders
+sender_celltype <-"1" # select cluster 1.
+
+expressed_genes_sender = get_expressed_genes(sender_celltype, myeloid_cells_clustered, pct = 0.10, "RNA")
+
+length(expressed_genes_sender)# 6871 genes
+```
+
+
+# 2. Define a gene set of interest: these are the genes in the “receiver/target” cell population that are potentially affected by ligands expressed.
+```{r}
+DE_PrimedvDATP = FindMarkers(object = epithelial_cells, ident.1 = 4, ident.2 = 5, min.pct = 0.10) %>% rownames_to_column("gene")
+DE_PrimedvDATP <- DE_PrimedvDATP[order(abs(DE_PrimedvDATP$avg_log2FC), decreasing = T),]
+
+geneset <- c(DE_PrimedvDATP$gene[1:750])# tous les gènes avec un avg_log2FC supérieur ou inférieur à 0.5
+geneset <- unique(geneset)
+length(geneset) 
+```
+
+3. Define a set of potential ligands: these are ligands that are expressed by the “sender/niche” cell population
+```{r}
+ligands = lr_network %>% pull(from) %>% unique()
+receptors = lr_network %>% pull(to) %>% unique()
+
+expressed_ligands = intersect(ligands,expressed_genes_sender)
+expressed_receptors = intersect(receptors,expressed_genes_receiver)
+
+potential_ligands = lr_network %>% filter(from %in% expressed_ligands & to %in% expressed_receptors) %>% pull(from) %>% unique()
+```
+
+
+4) Perform NicheNet ligand activity analysis: rank the potential ligands based on the presence of their target genes in the gene set of interest (compared to the background set of genes)
+```{r}
+ligand_activities = predict_ligand_activities(geneset = geneset, background_expressed_genes = background_expressed_genes, ligand_target_matrix = ligand_target_matrix, potential_ligands = potential_ligands)
+
+ligand_activities = ligand_activities %>% arrange(-pearson) %>% mutate(rank = rank(desc(pearson)))
+ligand_activities
+```
+
+
+```{r}
+best_upstream_ligands = ligand_activities %>% top_n(20, pearson) %>% arrange(-pearson) %>% pull(test_ligand) %>% unique()
+```
+
+
+```{r}
+DotPlot(myeloid_cells_clustered, features = best_upstream_ligands %>% rev(), cols = "RdYlBu", group.by = "CellType") + RotatedAxis()
+#ggsave("Dotplot_ligand_Motro=>AT1.png", height = 7, width = 12)
+```
+
+
+# Find the target genes influence by the ligands
+```{r}
+# find the weight of the link that associate the possible ligands and the gene in the geneset
+active_ligand_target_links_df = best_upstream_ligands %>% lapply(get_weighted_ligand_target_links,geneset = geneset, ligand_target_matrix = ligand_target_matrix, n = 200) %>% bind_rows() %>% drop_na()
+
+# create a tibble desbring the data in active_ligand_target_links_df
+active_ligand_target_links = prepare_ligand_target_visualization(ligand_target_df = active_ligand_target_links_df, ligand_target_matrix = ligand_target_matrix, cutoff = 0.33)
+
+#
+order_ligands = intersect(best_upstream_ligands, colnames(active_ligand_target_links)) %>% rev() %>% make.names()
+order_targets = active_ligand_target_links_df$target %>% unique() %>% intersect(rownames(active_ligand_target_links)) %>% make.names()
+rownames(active_ligand_target_links) = rownames(active_ligand_target_links) %>% make.names() # make.names() for heatmap visualization of genes like H2-T23
+colnames(active_ligand_target_links) = colnames(active_ligand_target_links) %>% make.names() # make.names() for heatmap visualization of genes like H2-T23
+
+vis_ligand_target = active_ligand_target_links[order_targets,order_ligands] %>% t()
+```
+
+```{r}
+p_ligand_target_network = vis_ligand_target %>% make_heatmap_ggplot("Prioritized ligands","Predicted target genes", color = "purple",legend_position = "top", x_axis_position = "top",legend_title = "Regulatory potential")  + theme(axis.text.x = element_text(face = "italic")) + scale_fill_gradient2(low = "whitesmoke",  high = "purple", breaks = c(0,0.0045,0.0090))
+
+p_ligand_target_network
+```
+
+
+# Display the receptor
+```{r}
+lr_network_top = lr_network %>% filter(from %in% best_upstream_ligands & to %in% expressed_receptors) %>% distinct(from,to)
+best_upstream_receptors = lr_network_top %>% pull(to) %>% unique()
+
+lr_network_top_df_large = weighted_networks_lr %>% filter(from %in% best_upstream_ligands & to %in% best_upstream_receptors)
+
+lr_network_top_df = lr_network_top_df_large %>% spread("from","weight",fill = 0)
+lr_network_top_matrix = lr_network_top_df %>% dplyr::select(-to) %>% as.matrix() %>% magrittr::set_rownames(lr_network_top_df$to)
+
+dist_receptors = dist(lr_network_top_matrix, method = "binary")
+hclust_receptors = hclust(dist_receptors, method = "ward.D2")
+order_receptors = hclust_receptors$labels[hclust_receptors$order]
+    
+dist_ligands = dist(lr_network_top_matrix %>% t(), method = "binary")
+hclust_ligands = hclust(dist_ligands, method = "ward.D2")
+order_ligands_receptor = hclust_ligands$labels[hclust_ligands$order]
+
+order_receptors = order_receptors %>% intersect(rownames(lr_network_top_matrix))
+order_ligands_receptor = order_ligands_receptor %>% intersect(colnames(lr_network_top_matrix))
+
+vis_ligand_receptor_network = lr_network_top_matrix[order_receptors, order_ligands_receptor]
+rownames(vis_ligand_receptor_network) = order_receptors %>% make.names()
+colnames(vis_ligand_receptor_network) = order_ligands_receptor %>% make.names()
+```
+
+```{r}
+p_ligand_receptor_network = vis_ligand_receptor_network %>% t() %>% make_heatmap_ggplot("Ligands","Receptors", color = "mediumvioletred", x_axis_position = "top",legend_title = "Prior interaction potential")
+p_ligand_receptor_network
+```
+
+
+# Measuring ligand activity
+```{r}
+# ligand activity heatmap
+ligand_pearson_matrix = ligand_activities %>% dplyr::select(pearson) %>% as.matrix() %>% magrittr::set_rownames(ligand_activities$test_ligand)
+
+rownames(ligand_pearson_matrix) = rownames(ligand_pearson_matrix) %>% make.names()
+colnames(ligand_pearson_matrix) = colnames(ligand_pearson_matrix) %>% make.names()
+
+vis_ligand_pearson = ligand_pearson_matrix[order_ligands, ] %>% as.matrix(ncol = 1) %>% magrittr::set_colnames("Pearson")
+p_ligand_pearson = vis_ligand_pearson %>% make_heatmap_ggplot("Prioritized ligands","Ligand activity", color = "darkorange",legend_position = "top", x_axis_position = "top", legend_title = "Pearson correlation coefficient\ntarget gene prediction ability)") + theme(legend.text = element_text(size = 9))
+
+p_ligand_pearson
+```
+

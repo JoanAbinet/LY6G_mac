@@ -1,0 +1,86 @@
+---
+title: "Tradeseq"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: default
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(slingshot))
+suppressMessages(library(ggplot2))
+suppressMessages(library(tradeSeq))
+suppressMessages(library(ComplexHeatmap))
+suppressMessages(library(SingleCellExperiment))
+suppressMessages(library(formatR))
+```
+
+# Loading tradeseq results
+```{r pressure}
+sce_slingshot <- readRDS("sce_slingshot.rds")
+```
+
+# Select the gene with different expression pattern across the 2 lineages
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+patternRes <- patternTest(sce_slingshot)
+patternRes <- patternRes[patternRes$waldStat >= 200,]
+```
+
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+gene_list_lo <- rownames(patternRes[order(patternRes$fcMedian, decreasing = TRUE),])[1:200]
+
+# Remove 6 genes that look like outliers
+gene_list_lo <- gene_list_lo[ !gene_list_lo %in%  c("Sftpc","Igkc","Ighg3","Elovl1","Slpi","Gsn")]
+
+yhatSmooth <- predictSmooth(sce_slingshot, gene = gene_list_lo, nPoints = 50, tidy = FALSE)
+
+Heatmap_diffGenes <- ComplexHeatmap::Heatmap(t(scale(t(yhatSmooth))),
+                cluster_columns = FALSE,
+                show_row_names = T, 
+                show_column_names = F)
+
+#tidyHeatmap::save_pdf(Heatmap_diffGenes, "Heatmap_diffGenes.pdf", width = 20, height = 65, units = "cm")
+```
+
+# Find gene with similar expression across lineage
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+assoRes <- associationTest(sce_slingshot)
+assoRes <- assoRes[order(assoRes$waldStat, decreasing = TRUE),]
+
+gene_list_lo <- rownames(assoRes[order(assoRes$waldStat, decreasing = TRUE),])[1:200]
+
+yhatSmooth <- predictSmooth(sce_slingshot, gene = gene_list_lo, nPoints = 50, tidy = FALSE)
+
+Heatmap_same_Genes<- ComplexHeatmap::Heatmap(t(scale(t(yhatSmooth))),
+                cluster_columns = FALSE,
+                show_row_names = T, 
+                show_column_names = F)
+
+#tidyHeatmap::save_pdf(Heatmap_same_Genes, "Heatmap_same_Genes.pdf", width = 20, height = 65, units = "cm")
+```
+
+```{r}
+sessionInfo()
+```

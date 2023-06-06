@@ -1,0 +1,121 @@
+---
+title: "Preprocessing And clustering"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: default
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80), tidy=TRUE)
+```
+
+# Loading packages
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dittoSeq))
+suppressMessages(library(formatR))
+```
+
+# Loading data
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+# Importing myeloid cells
+path<-"../1-Preprocessing_workflow"
+myeloid_cells <- readRDS(paste0(path,"/Myeloid_cells_Part1.rds"))
+
+# Importing IM_cells
+IMcells.data <- Read10X(data.dir = paste("barcode_j0", sep = ""))
+IMcells <- CreateSeuratObject(counts = IMcells.data, project = "IM_cells", min.cells = 3, min.features = 200)
+
+# QC on IM_cells
+IMcells[["percent.mt"]] <- PercentageFeatureSet(IMcells, pattern = "^mt-")
+IMcells <- subset(IMcells, subset = nFeature_RNA > 1000 & nFeature_RNA < 4000 & nCount_RNA < 20000 & percent.mt < 10) 
+```
+
+# Integretion workflow
+```{r, message = FALSE}
+seurat_list <- list(myeloid_cells, IMcells)
+
+seurat_list <- lapply(X = seurat_list, FUN = function(x) {
+    x <- NormalizeData(x)
+    x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+features <- SelectIntegrationFeatures(object.list = seurat_list)
+
+cells.anchors <- FindIntegrationAnchors(object.list = seurat_list, anchor.features = features)
+cells.combined <- IntegrateData(anchorset = cells.anchors)
+
+cells.combined <- ScaleData(cells.combined, verbose = FALSE)
+cells.combined <- RunPCA(cells.combined, npcs = 30, verbose = FALSE)
+
+cells.combined <- RunUMAP(cells.combined, reduction = "pca", dims = 1:16)
+cells.combined <- FindNeighbors(cells.combined, reduction = "pca", dims = 1:16)
+cells.combined <- FindClusters(cells.combined, resolution = 0.7) 
+```
+
+# Visualizing all clusters
+```{r}
+DimPlot(cells.combined, reduction = "umap", label = T)
+```
+
+# The clusters 12, 14, 15 were identified as contamination and had to be removed.
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+# Selecting the clusters we want to keep
+myeloid_cells_filtered <- subset(cells.combined, seurat_clusters %in% c(0,1,2,3,4,5, 6,7,8,9,10 ,11,13))
+
+# Re-running the linear reduction step
+myeloid_cells_filtered <- FindVariableFeatures(myeloid_cells_filtered, 
+                                               selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(myeloid_cells_filtered)
+myeloid_cells_filtered <- ScaleData(myeloid_cells_filtered, features = all.genes)
+myeloid_cells_filtered <- RunPCA(myeloid_cells_filtered,
+                                 features = VariableFeatures(object = myeloid_cells_filtered))
+plot1 <- DimPlot(myeloid_cells_filtered, reduction = "pca")
+
+
+myeloid_cells_filtered <- JackStraw(myeloid_cells_filtered, num.replicate = 100)
+myeloid_cells_filtered <- ScoreJackStraw(myeloid_cells_filtered, dims = 1:20)
+plot2 <- JackStrawPlot(myeloid_cells_filtered, dims = 1:20)
+plot3 <- ElbowPlot(myeloid_cells_filtered)
+
+# Re running the clustering step
+myeloid_cells_filtered <- RunUMAP(myeloid_cells_filtered, dims = 1:15)
+myeloid_cells_filtered <- FindNeighbors(myeloid_cells_filtered, dims = 1:15)
+myeloid_cells_filtered <- FindClusters(myeloid_cells_filtered, resolution = 0.7)# the resolution has been chosen based on trial and error, and 0.7 appear to be the most relevant
+```
+
+Reversing umap coordiante for consistency
+```{r}
+myeloid_cells_filtered@reductions$umap@cell.embeddings[,2] <- -myeloid_cells_filtered@reductions$umap@cell.embeddings[,2]
+```
+
+
+```{r}
+DimPlot(myeloid_cells_filtered, reduction = "umap", label = T)
+```
+
+# Saving the results for further analysis
+```{r eval = FALSE}
+saveRDS(myeloid_cells_filtered, "Myeloid_cells_Part2.rds")
+```
+
+```{r}
+sessionInfo()
+```

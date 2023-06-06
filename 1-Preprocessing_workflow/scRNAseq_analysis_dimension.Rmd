@@ -1,0 +1,151 @@
+---
+title: "scRNAseq_analysis"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: default
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=80), tidy=TRUE)
+```
+
+# Loading packages
+```{r cars}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(SingleR))
+suppressMessages(library(formatR))
+```
+
+# Loading data
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_ctrl.data <- Read10X(data.dir = "Counts/1_sample_feature_bc_matrix/") # it is require to specify 10x directory
+cell_MyeloidCtrl <- CreateSeuratObject(counts = myeloid_ctrl.data$`Gene Expression`, project = "cell_myeloid_ctrl", min.cells = 3, min.features = 200)
+
+motro_pr8.data <- Read10X(data.dir = "Counts/2_sample_feature_bc_matrix/")
+cell_MotroPr8 <- CreateSeuratObject(counts = motro_pr8.data$`Gene Expression`, project = "cell_Motro_Pr8", min.cells = 3, min.features = 200)
+
+myeloid_pr8.data <- Read10X(data.dir = "Counts/3_sample_feature_bc_matrix/")
+cell_myeloidPr8 <- CreateSeuratObject(counts = myeloid_pr8.data$`Gene Expression`, project = "cell_myeloidPr8", min.cells = 3, min.features = 200)
+
+# Merge the 3 seurat object
+myeloid_cell <- merge(cell_MyeloidCtrl, y = c(cell_MotroPr8, cell_myeloidPr8), add.cell.ids = c("1", "2", "3"), project = "Myeloid_cells")
+```
+
+# Quality control
+```{r}
+myeloid_cell[["percent.mt"]] <- PercentageFeatureSet(myeloid_cell, pattern = "^mt-") 
+VlnPlot(myeloid_cell, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1)
+```
+
+# Pre-processing workflow
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+# removing low quality cells
+myeloid_cell <- subset(myeloid_cell, subset = nFeature_RNA > 200 & nFeature_RNA < 5000 & nCount_RNA < 20000 & percent.mt < 10) 
+
+# Normalizing the data
+myeloid_cell <- NormalizeData(myeloid_cell, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# Feature selection
+myeloid_cell <- FindVariableFeatures(myeloid_cell, selection.method = "vst", nfeatures = 2000) 
+
+# Identify the 10 most highly variable genes
+top10 <- head(VariableFeatures(myeloid_cell), 10)
+
+# plot variable features without labels
+plot1 <- VariableFeaturePlot(myeloid_cell)
+plot1 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+
+# Scaling the data
+all.genes <- rownames(myeloid_cell)
+myeloid_cell <- ScaleData(myeloid_cell, features = all.genes)
+
+# Linear dimensional reduction
+myeloid_cell <- RunPCA(myeloid_cell, features = VariableFeatures(object = myeloid_cell))
+plot2 <- DimPlot(myeloid_cell, reduction = "pca")
+
+# Determine the ‘dimensionality’ of the dataset
+myeloid_cell <- JackStraw(myeloid_cell, num.replicate = 100)
+myeloid_cell <- ScoreJackStraw(myeloid_cell, dims = 1:20)
+plot3 <- JackStrawPlot(myeloid_cell, dims = 1:20)
+plot4 <- ElbowPlot(myeloid_cell,ndims = 20)
+
+# Cluster cells in umap
+myeloid_cell <- FindNeighbors(myeloid_cell, dims = 1:15)
+myeloid_cell <- FindClusters(myeloid_cell, resolution = 0.25)
+myeloid_cell <- RunUMAP(myeloid_cell, dims = 1:15)
+```
+
+```{r fig.width=12, fig.height=10}
+plot1+ plot2 + plot3 +plot4
+```
+# Visualizing all clusters
+```{r }
+DimPlot(myeloid_cell, reduction = "umap", label = T)
+```
+
+# Cell annotation
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+library(SingleR)
+library(ExperimentHub)
+library(scuttle)
+
+eh <- ExperimentHub()
+query(eh, "TabulaMurisData")
+
+ref <- eh[['EH1617']]
+myeloid_ref <-ref[,!is.na(ref$cell_ontology_class)]
+myeloid_ref <- myeloid_ref[,myeloid_ref$tissue == "Lung"]
+
+myeloid_ref <-logNormCounts(myeloid_ref)
+
+tested_data <- as.SingleCellExperiment(myeloid_cell)
+tested_data <- logNormCounts(tested_data)
+
+results <- SingleR(test =tested_data  , ref = myeloid_ref, labels = myeloid_ref$cell_ontology_class)
+cell_annotations <- results
+
+myeloid_cell[["singleR_annotation"]] <- cell_annotations[,c(4)]
+```
+
+```{r}
+DimPlot(myeloid_cell, reduction = "umap", group.by = "singleR_annotation")
+```
+
+# Removing the variable used for annotation
+```{r}
+rm(tested_data)
+rm(myeloid_ref)
+```
+
+The next step is to subset the clusters of myeloid cells (Macropages, neutrophils, DCs). The others clusters will be removed.
+
+# Removing contamination
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_cells <- subset(myeloid_cell, seurat_clusters %in% c(0,2,3,4,7,8,10))
+```
+
+# Saving file
+```{r, eval = FALSE"}
+saveRDS(myeloid_cells, "Myeloid_cells_Part1.rds")
+```
+
+```{r}
+sessionInfo()
+```

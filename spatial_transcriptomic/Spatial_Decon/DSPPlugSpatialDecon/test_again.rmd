@@ -1,0 +1,27 @@
+---
+title: "Test_again"
+author: "Abinet Joan"
+date: "5/11/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+source("SpatialDecon_plugin.R")
+```
+
+
+
+
+```{r pressure, echo=FALSE}
+load("../profile_matrix/ImmuneAtlas_ImmGen.RData")
+write.csv(x = profile_matrix, file = "../profile_matrix/ImmuneAtlas_ImmGen.csv", 
+          row.names = TRUE, quote = FALSE)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.

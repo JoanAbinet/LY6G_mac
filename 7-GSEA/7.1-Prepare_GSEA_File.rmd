@@ -1,0 +1,78 @@
+---
+title: "Preparing files for GSEA"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: default
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading Package
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+```
+
+# Loading seurat object
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_cells_clustered <- readRDS("../3-Visualisation_Clustering/Myeloid_cells_Final.rds")
+
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+
+DimPlot(myeloid_cells_clustered, reduction = "umap", cols = colors, group.by = "CellType")
+```
+
+# Generating gct file
+```{r eval=FALSE}
+avg = as.data.frame(myeloid_cells_clustered@assays[["RNA"]]@data)
+df = data.frame(NAME=rownames(avg), Description="NA", stringsAsFactors = F)
+df = cbind(df, avg)
+df = rbind(c("#1.2", rep(NA, ncol(df)-1)), c(nrow(df), ncol(df)-2, rep(NA, ncol(df)-2)), colnames(df), df)
+write.table(df, file = "exprMat.gct", sep = "\t", row.names = F, col.names = F, na = "", quote = F)
+```
+
+# Generating cls file
+```{r eval=FALSE}
+myeloid_cells_clustered$group <- myeloid_cells_clustered$seurat_clusters
+levels(myeloid_cells_clustered$group) <- c("Other","Motro","Other","Other","Other", "Other", "Other", "Other", "Other","Other","Other","Other")
+
+table(myeloid_cells_clustered$seurat_clusters)
+table(myeloid_cells_clustered$group)
+
+no_tot = ncol(avg)
+no_classes = summary(myeloid_cells_clustered$group)
+df = data.frame(matrix(ncol=no_tot))
+df[1,] = c(no_tot, length(no_classes), 1, rep(NA, no_tot - 3))
+line2 = "#"
+line3 = as.vector(myeloid_cells_clustered$group)
+for (i in 1:length(no_classes)){
+  line2 = c(line2, as.vector(unique(myeloid_cells_clustered$group)[i]))
+}
+line2 = c(line2, rep(NA, no_tot - length(line2)))
+df = rbind(df, line2, line3)
+write.table(df, file = "MetaData.cls", sep = "\t", row.names = F, col.names = F, na = "", quote = F)
+```
+
+The output of the GSEA is stored on "GSEA_Output" directory. It's important to note that all the files except the one used to create dotplot were removed.
+
+```{r}
+sessionInfo()
+```

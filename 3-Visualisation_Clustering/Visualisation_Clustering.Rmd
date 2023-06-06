@@ -1,0 +1,196 @@
+---
+title: "Clustering and Visualisation"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: default
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading packages
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dittoSeq))
+suppressMessages(library(formatR))
+suppressMessages(library(ComplexHeatmap))
+```
+
+
+# Loading data
+```{r}
+myeloid_cells <- readRDS("Myeloid_cells_Part2.rds")
+```
+
+# Adding the cell type to metadata
+```{r}
+labels <- c("CD206- IM","Ly6G Macs","Ly6C- Mo","Ly6C+ Mo","CD64+ cMo","AM","Neutrophils","CD206+ IM","DCs","Dying cells","Cycling Macs","IAV-specific AM")
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+
+# create a new column in metadata
+myeloid_cells$CellType <- myeloid_cells$seurat_clusters
+
+# replace cluster number by cell type
+levels(myeloid_cells$CellType) <-labels
+```
+
+```{r}
+DimPlot(myeloid_cells, reduction = "umap", cols = colors, group.by = "CellType") + plot_annotation(
+  title = 'Myeloid Cells - All conditions',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5)))
+
+#ggsave("graph_Umap.pdf",  height = 12 , width = 19, units = "cm")
+```
+
+# Visualsation of the frequency graph.
+```{r}
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+
+labels <- c("CD206- IM","Ly6G Macs","Ly6C- Mo","Ly6C+ Mo","CD64+ cMo","AM","Neutrophils","CD206+ IM","DCs","Dying cells","Cycling Macs","IAV-specific AM")
+
+#var.labels.rename = labels
+var_order <- c(1,2,5,6,7,8,9,10,11,12,3,4)
+
+dittoBarPlot(myeloid_cells, "seurat_clusters", group.by = "orig.ident", color.panel = colors, main ="", var.labels.reorder = var_order, var.labels.rename = labels, x.labels = c("Ly6G Macs", "Mock", "PR8", "Mo-IM"), x.labels.rotate = F, xlab = "Sample")+ plot_annotation(
+  title = 'Myeloid Cells - Cluster frequency',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5))) 
+
+#ggsave("graphe_clusterFreq.pdf", height = 12 , width = 19, units = "cm")
+```
+
+# Visualisation of the Mock cells
+```{r}
+cell_myeloid_ctrl <- subset(myeloid_cells, orig.ident %in% "cell_myeloid_ctrl")
+
+colors_mock <- c("#B2DF8A","#1F78B4","#A6CEE3", "#E31A1C","#E3751C", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+
+DimPlot(cell_myeloid_ctrl, reduction = "umap", cols = colors_mock, group.by = "CellType") + plot_annotation(
+  title = 'Myeloid Cells - Mock',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5)))
+
+#ggsave("UMAP_mock.pdf", height = 12 , width = 19, units = "cm")
+```
+
+# Visualisation of the PR8 cells
+```{r}
+cell_myeloid_Pr8 <- subset(myeloid_cells, orig.ident %in% "cell_myeloidPr8")
+
+DimPlot(cell_myeloid_Pr8, reduction = "umap", cols = colors, group.by = "CellType") + plot_annotation(
+  title = 'Myeloid Cells - PR8',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5)))
+
+#ggsave("UMAP_PR8.pdf", height = 12 , width = 19, units = "cm")
+```
+
+
+# Visualisation IMcells
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+cell_myeloid_IMcells <- subset(myeloid_cells, orig.ident %in% "IM_cells")
+
+DimPlot(cell_myeloid_IMcells, reduction = "umap", cols = colors, group.by = "CellType") + plot_annotation(
+  title = 'Myeloid Cells - Mo-IM',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5)))
+
+#ggsave("UMAP_PR8.pdf", height = 12 , width = 19, units = "cm")
+```
+
+# Visualisation of Motro Cells
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+cell_myeloid_Ly6GMacs <- subset(myeloid_cells, orig.ident %in% "cell_Motro_Pr8")
+
+DimPlot(cell_myeloid_Ly6GMacs, reduction = "umap", cols = colors, group.by = "CellType") + plot_annotation(
+  title = 'Myeloid Cells - Ly6G Macs',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5)))
+
+#ggsave("UMAP_Ly6GMacs.pdf", height = 12 , width = 19, units = "cm")
+```
+
+# Save the result for further analysis
+```{r eval=FALSE}
+saveRDS(myeloid_cells, "Myeloid_cells_Final.rds")
+```
+
+
+```{r fig.width=20, fig.height=5}
+DefaultAssay(myeloid_cells) <- "RNA"
+
+DotPlot(myeloid_cells, features = c("C1qa", "Cd74", "Tmem119", "Ctsb", "Ctsz", "Lgals1", "Lgals3", "Arg1", "Spp1", "Ace", "Nr4a1", "Fcgr4", "Ccr2","Ly6c2", "Irf7", "Chil3", "Ear1", "Fabp1", "S100a8", "S100a9", "Mmp9", "C1qc", "Mrc1", "Maf", "H2-Ab1", "Cd209a", "Flt3", "percent.mt", "Birc5", "Top2a", "Mki67", "Ear2"), group.by = "CellType") + plot_annotation(
+  title = 'Dot plot genes markers',
+  theme = theme(plot.title = element_text(size = 16, hjust = 0.5)))
+```
+
+# Differential expression Analysis
+```{r, eval=FALSE}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+myeloids.markers <- FindAllMarkers(myeloid_cells, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, test.use = "LR", latent.vars = "orig.ident") # The execution is quite long
+```
+
+The results from DE can directly be load from a csv file
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloids.markers <- read.csv("myeloids_markers.csv")
+```
+
+
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+# select the top 10 markers the most diferentially expressed of each clusters
+myeloids.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 20, wt = avg_log2FC) -> top10
+
+mat <- as.matrix( GetAssayData(object = myeloid_cells, slot = "data")[as.character(top10$gene),])
+ 
+df <- as.data.frame(myeloid_cells$CellType)
+colnames(df) <- "Clusters"
+
+color_df <- list(Clusters = 
+                   c("CD206- IM" = "#B2DF8A",
+                     "Ly6G Macs" = "#ABD61C",
+                     "Ly6C- Mo" = "#1F78B4",
+                     "Ly6C+ Mo" = "#A6CEE3",
+                     "CD64+ cMo" = "#E31A1C",
+                     "AM" = "#E3751C",
+                     "Neutrophils" = "#600078",
+                     "CD206+ IM" = "#33A02C",
+                     "DCs" = "#FDBF6F",
+                     "Dying cells" = "#526317",
+                     "Cycling Macs" = "#D4AAC6",
+                     "IAV-specific AM" = "#784620"))
+
+heatmap_allGenes <- Heatmap(t(scale(t(mat))), name="expressop,", show_column_names = FALSE, 
+        column_split = factor(myeloid_cells$CellType),
+        cluster_column_slices = F,
+        cluster_rows = F, 
+        show_column_dend = F,
+        top_annotation = HeatmapAnnotation(df = df, col = color_df),
+        column_title_rot = 90,
+        row_names_gp = gpar(fontsize = 8),
+        row_names_side = "left",
+        use_raster=F,
+        show_heatmap_legend = F)
+
+#tidyHeatmap::save_pdf(heatmap_allGenes, "Heatmap.pdf", width = 30, height = 55, units = "cm")
+```
+
+```{r}
+sessionInfo()
+```
+
+

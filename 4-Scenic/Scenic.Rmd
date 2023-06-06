@@ -1,0 +1,252 @@
+---
+title: "Scenic"
+author: "Abinet Joan"
+date: "12/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading packages
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(SCENIC)) 
+suppressMessages(library(ComplexHeatmap))
+suppressMessages(library(AUCell))
+```
+
+# Loading data
+```{r}
+myeloid_cells_clustered <- readRDS("../3-Visualisation_Clustering/Myeloid_cells_Final.rds")
+```
+
+# Prepare cellinfo and expression matrix
+```{r}
+exprMat <- myeloid_cells_clustered@assays$RNA@data
+cellInfo <- data.frame(seuratCluster=Idents(myeloid_cells_clustered))
+cellInfo$nGene <- colSums(exprMat>0)
+
+dir.create ("int")
+#saveRDS(exprMat, file = "int/exprMat.Rds")
+#saveRDS(cellInfo, file = "int/cellInfo.Rds")
+```
+
+# Download binding motifs for mouse 
+```{r}
+dbFiles <- c("https://resources.aertslab.org/cistarget/databases/old/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-500bp-upstream-7species.mc9nr.feather",
+"https://resources.aertslab.org/cistarget/databases/old/mus_musculus/mm9/refseq_r45/mc9nr/gene_based/mm9-tss-centered-10kb-7species.mc9nr.feather")
+
+dir.create("cisTarget_databases");
+setwd("cisTarget_databases") 
+for(featherURL in dbFiles)
+{
+  download.file(featherURL, destfile=basename(featherURL)) # saved in current dir
+}
+```
+
+# Initialise settings
+```{r}
+org <- "mgi"
+dbDir <- "cisTarget_databases"
+dbDir <- path.expand(dbDir)
+myDatasetTitle <- "SCENIC Analysis"
+data(defaultDbNames)
+dbs <- defaultDbNames[[org]]
+scenicOptions <- initializeScenic(org=org, dbDir=dbDir, dbs=dbs, nCores=25) 
+```
+
+# Gene filtering
+1. Filter by the total number of reads per gene. Keeps only the genes with at least 6 UMI counts across all samples.
+
+2. Filter by the number of cells in which the gene is detected. 
+```{r}
+exprMat <- as.matrix(exprMat) # need a regulat matrix
+genesKept <- geneFiltering(exprMat, scenicOptions=scenicOptions,
+                           minCountsPerGene=3*.01*ncol(exprMat),
+                           minSamples=ncol(exprMat)*.01)
+
+exprMat_filtered <- exprMat[genesKept, ]
+```
+
+# Correlation
+```{r}
+runCorrelation(exprMat_filtered, scenicOptions)
+```
+
+# Genie3
+This step is time consuming
+```{r}
+runGenie3(exprMat, scenicOptions)
+```
+
+# Build and score the GRN
+```{r}
+runGenie3(exprMat_filtered, scenicOptions)
+
+scenicOptions@settings$verbose <- TRUE
+scenicOptions@settings$nCores <- 10
+scenicOptions@settings$seed <- 123
+
+runSCENIC_1_coexNetwork2modules(scenicOptions)
+runSCENIC_2_createRegulons(scenicOptions)
+runSCENIC_3_scoreCells(scenicOptions, exprMat_filtered)
+```
+
+```{r}
+regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC") # nécessite file int/3.4_regulonAUC.Rds
+
+
+rss <- calcRSS(AUC=getAUC(regulonAUC), cellAnnotation=cellInfo[colnames(regulonAUC), "seuratCluster"])
+#rssPlot <- plotRSS(rss["Mafb (44g)",])
+rssPlot <- plotRSS(rss)
+plotly::ggplotly(rssPlot$plot)
+```
+
+```{r}
+plotly::ggplotly(rssPlot$plot)
+```
+
+
+# 
+```{r}
+rss <- rss[,c(8,11,2,3,7,1,12,9,4,6,5,10)]
+
+top_tf <- c()
+for (i in 1:length(colnames(rss))) {
+  
+  TFs <- sort(rss[,i], decreasing = T)
+  top_10 <- head(TFs, 10)
+  top_tf <- c(top_tf,top_10)
+}
+
+length(top_tf)
+
+top_tf
+ 
+# Creation of the Heatmap
+
+regulonAUC.mat <- regulonAUC@assays@data@listData$AUC
+Subset_regulonActivity <-regulonAUC.mat[names(top_tf),]
+
+regulonActivity_byCellType_Scaled <- t(scale(t(Subset_regulonActivity), center = T, scale=T))
+
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+names(colors) <- levels(myeloid_cells_clustered$CellType) 
+
+df <- as.data.frame(myeloid_cells_clustered$CellType)
+colnames(df) <- "CellType"
+
+color_df <- list(CellType = 
+                   c("CD206- IM" = "#B2DF8A",
+                     "Ly6G Macs" = "#ABD61C",
+                     "Ly6C- Mo" = "#1F78B4",
+                     "Ly6C+ Mo" = "#A6CEE3",
+                     "CD64+ cMo" = "#E31A1C",
+                     "AM" = "#E3751C",
+                     "Neutrophils" = "#600078",
+                     "CD206+ IM" = "#33A02C",
+                     "DCs" = "#FDBF6F",
+                     "Dying cells" = "#526317",
+                     "Cycling Macs" = "#D4AAC6",
+                     "IAV-specific AM" = "#784620"))
+
+png(file="/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/4Scenic/Heatmap.png", width = 2000, height = 2500)
+
+Heatmap(Subset_regulonActivity[], name="Regulon activity", show_column_names = FALSE, 
+        column_split = factor(myeloid_cells_clustered$CellType),
+        cluster_column_slices = F,
+        cluster_rows = F,
+        bottom_annotation = HeatmapAnnotation(df = df, col = color_df))
+dev.off()
+
+```
+# Create the same heatmap, but in seperated piece for visualisation purpose
+```{r}
+# Here I generate the last part of the heatmap
+top_tf_sub <- top_tf[81:120]
+regulonAUC.mat <- regulonAUC@assays@data@listData$AUC
+Subset_regulonActivity <-regulonAUC.mat[names(top_tf_sub),]
+
+regulonActivity_byCellType_Scaled <- t(scale(t(Subset_regulonActivity), center = T, scale=T))
+
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+names(colors) <- levels(myeloid_cells_clustered$CellType) 
+
+df <- as.data.frame(myeloid_cells_clustered$CellType)
+colnames(df) <- "CellType"
+
+color_df <- list(CellType = 
+                   c("CD206 IM" = "#B2DF8A",
+                     "PR8 Mac1" = "#ABD61C",
+                     "pMo" = "#1F78B4",
+                     "cMo" = "#A6CEE3",
+                     "CD64+ cMo" = "#E31A1C",
+                     "AM" = "#E3751C",
+                     "Neutro" = "#600078",
+                     "CD206+ IM" = "#33A02C",
+                     "DCs" = "#FDBF6F",
+                     "PR8 Mac2" = "#526317",
+                     "Cycling Mac" = "#D4AAC6",
+                     "PR8 AM" = "#784620"))
+
+png(file="/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/4Scenic/Heatmap_divided/Heatmap_8-11.png", width = 1500, height = 1000)
+
+Heatmap(Subset_regulonActivity[], name="Regulon activity", show_column_names = FALSE, 
+        column_split = factor(myeloid_cells_clustered$CellType),
+        cluster_column_slices = F,
+        cluster_rows = F,
+        top_annotation = HeatmapAnnotation(df = df, col = color_df))
+dev.off()
+```
+
+
+Explique comment faire des colorations.
+
+https://github.com/jokergoo/ComplexHeatmap/issues/148
+
+```{r}
+TF <- c("Mafb (44g)", "Maf (220g)", "Stat1 (102g)")
+
+df <- as.data.frame(myeloid_cells_clustered$CellType)
+colnames(df) <- "Clusters"
+
+color_df <- list(Clusters = 
+                   c("CD206 IM" = "#B2DF8A",
+                     "PR8 Mac1" = "#ABD61C",
+                     "pMo" = "#1F78B4",
+                     "cMo" = "#A6CEE3",
+                     "CD64+ cMo" = "#E31A1C",
+                     "AM" = "#E3751C",
+                     "Neutro" = "#600078",
+                     "CD206+ IM" = "#33A02C",
+                     "DCs" = "#FDBF6F",
+                     "PR8 Mac2" = "#526317",
+                     "Cycling Mac" = "#D4AAC6",
+                     "PR8 AM" = "#784620"))
+
+#pdf(file="/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/4Scenic/Heatmap_cMafMafbstat2.pdf", width = 2000, height = 1000)
+heatmap_maf <- Heatmap(regulonAUC.mat[TF,], name="Regulon activity", show_column_names = FALSE, 
+        column_split = factor(myeloid_cells_clustered$CellType),
+        cluster_column_slices = F,
+        cluster_rows = F,
+        bottom_annotation = HeatmapAnnotation(df = df, col = color_df))
+#dev.off()
+
+#setequal(levels(df), names(color_df$test))
+```
+
+
+saving heatmap as pdf
+```{r}
+tidyHeatmap::save_pdf(heatmap_maf, "/home/qiang/Documents/Travail_cell/Travail_V3/Cécilia_project_2/4Scenic/Heatmap_cMafMafbstat2.pdf", width = 30, height = 10, units = "cm")
+```
+

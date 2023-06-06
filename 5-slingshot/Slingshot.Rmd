@@ -1,0 +1,160 @@
+---
+title: "Slingshot Trajectory"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: default
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading Package
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(slingshot))
+suppressMessages(library(ggplot2))
+suppressMessages(library(grDevices))
+suppressMessages(library(scales))
+suppressMessages(library(tradeSeq))
+suppressMessages(library(viridisLite))
+```
+
+# Slingshot trajectory
+
+## Loading UMAP and subseting clusters
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_cells_clustered <- readRDS("../3-Visualisation_Clustering/Myeloid_cells_Final.rds")
+
+myeloid_cells_pseudotime <- subset(myeloid_cells_clustered, seurat_clusters %in% c(0,1,3,4,7,9))
+myeloid_cells_pseudotime <- RunUMAP (myeloid_cells_pseudotime , dims = 1:12)
+
+colors <- c("#B2DF8A","#ABD61C","#A6CEE3", "#E31A1C", "#33A02C", "#526317")
+
+DimPlot(myeloid_cells_pseudotime, cols = colors, reduction = "umap")
+```
+
+## Run slingshot
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+p <- Embeddings(myeloid_cells_pseudotime, "umap")
+
+sds <- slingshot(Embeddings(myeloid_cells_pseudotime, "umap"), myeloid_cells_pseudotime$seurat_clusters)
+# the two step of slingshot can be run separately using getlineages and getcurves
+
+myeloid_cells_pseudotime$color <- myeloid_cells_pseudotime$seurat_clusters
+levels(myeloid_cells_pseudotime$color) <-c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6","#784620")
+
+#pdf("Trajectory_slingshot.pdf", width = 19/3, height = 14/3) 
+plot(reducedDim(sds), col = as.vector(myeloid_cells_pseudotime$color), pch = 16, cex = 0.5)
+lines(sds, lwd = 2, col = 'black')
+#dev.off() 
+```
+
+## Visualizing lineage
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+nc <- 3
+pt <- slingPseudotime(sds)
+nms <- colnames(pt)
+nr <- ceiling(length(nms)/nc)
+pal <- viridis(100, end = 0.95)
+par(mfrow = c(nr, nc))
+
+y <- 1
+for (i in nms) {
+  colors <- pal[cut(pt[,i], breaks = 100)]
+  #pdf(paste0("Trajectory_",y,".pdf"), width = 19/3, height = 14/3) 
+  plot(reducedDim(sds), col = colors, pch = 16, cex = 0.5, main = i)
+  lines(sds, lwd = 2, col = 'black')
+  #dev.off() 
+  y <- y+1
+}
+```
+
+
+Since the dying cells of cluster 9 cause huge differences in gene expression, it hides smaller differences in the trajectory between cluster 4 and 1, and between cluster 4 and 0. So cluster 9 will be removed.
+
+# Slingshot without the Dying cells
+
+## Loading UMAP and subseting clusters
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_cells_pseudotime <- subset(myeloid_cells_clustered, seurat_clusters %in% c(0,1,3,4,7))
+myeloid_cells_pseudotime <- RunUMAP (myeloid_cells_pseudotime , dims = 1:12)
+
+colors <- c("#B2DF8A","#ABD61C","#A6CEE3", "#E31A1C", "#33A02C")
+DimPlot(myeloid_cells_pseudotime, reduction = "umap", label = T, cols = colors)
+```
+
+## Pseudotime by slingshot
+The Parameter have been modify to obtain a similar trajectory
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+p <- Embeddings(myeloid_cells_pseudotime, "umap")
+
+myeloid_cells_pseudotime$color <- myeloid_cells_pseudotime$seurat_clusters
+levels(myeloid_cells_pseudotime$color) <-c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6","#784620")
+
+sds2 <- getLineages(Embeddings(myeloid_cells_pseudotime, "umap"), myeloid_cells_pseudotime$seurat_clusters, start.clus = "3", end.clus = "1")
+sds2 <- getCurves(sds2)
+
+#pdf("Trajectory_slingshot_moddif.pdf", width = 19/3, height = 14/3)
+plot(reducedDim(sds2), col = as.vector(myeloid_cells_pseudotime$color), pch = 16, cex = 0.5)
+lines(sds2, lwd = 2, col = 'black')
+#dev.off() 
+```
+
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+nc <- 3
+pt <- slingPseudotime(sds2)
+nms <- colnames(pt)
+nr <- ceiling(length(nms)/nc)
+pal <- viridis(100, end = 0.95)
+par(mfrow = c(nr, nc))
+for (i in nms) {
+  colors <- pal[cut(pt[,i], breaks = 100)]
+  plot(reducedDim(sds2), col = colors, pch = 16, cex = 0.5, main = i)
+  lines(sds2, lwd = 2, col = 'black')
+}
+```
+
+# TradeSeq
+
+## Decide the number of knots (step exclusive to tradeseq)
+```{r, eval=FALSE}
+CountMat <- myeloid_cells_pseudotime@assays$RNA@counts
+
+icMat <- evaluateK(counts = CountMat, sds = sds, k = 3:10, 
+                   nGenes = 200, verbose = T)
+```
+
+## Launching tradeSeq
+```{r, eval=FALSE}
+pseudotime <- slingPseudotime(sds, na = FALSE)
+cellWeights <- slingCurveWeights(sds)
+
+sce_slingshot <- fitGAM(counts = CountMat, pseudotime = pseudotime, cellWeights = cellWeights)
+```
+
+## Save the results
+```{r, eval=FALSE}
+saveRDS(sce_slingshot,"sce_slingshot.rds")
+```
+
+
+```{r}
+sessionInfo()
+```
