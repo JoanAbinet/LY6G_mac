@@ -1,0 +1,130 @@
+---
+title: "Scoring cell Epithelial"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 2
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Loading package
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(readxl))
+suppressMessages(library(singscore))
+suppressMessages(library(pheatmap))
+```
+
+# Loading the normalised count matrix
+```{r}
+Norm_exprMat <- read_excel("../Data_Thomas/Q3 - publication - V2.xlsx", sheet = "TargetCountMatrix")
+Norm_exprMat <- as.data.frame(Norm_exprMat)
+rownames(Norm_exprMat) <- Norm_exprMat$TargetName
+Norm_exprMat$TargetName <- NULL
+```
+
+## Get score AT2
+```{r}
+markers_AT2 <- read.csv("Signature/Markers_AT2.csv")
+
+markers_AT2 <- markers_AT2$X[1:20]
+
+rankData <- rankGenes(Norm_exprMat)
+
+scoredf <- simpleScore(rankData, upSet = markers_AT2)
+
+AT2 <- scoredf$TotalScore
+```
+
+## Get score PrimedAT2
+```{r}
+markers.PrimedAT2 <- read.csv("Signature/Markers_PrimedAT2.csv")
+markers.PrimedAT2 <- markers.PrimedAT2$X[1:20]
+
+rankData <- rankGenes(Norm_exprMat)
+
+scoredf <- simpleScore(rankData, upSet = markers.PrimedAT2)
+PrimedAT2 <- scoredf$TotalScore
+
+cell_singscore <- data.frame(AT2, PrimedAT2)
+```
+
+## Get score DATP
+```{r}
+markers.DATP <- read.csv("Signature/Markers_DATP.csv")
+markers.DATP <- markers.DATP$X[1:20]
+
+rankData <- rankGenes(Norm_exprMat)
+
+scoredf <- simpleScore(rankData, upSet = markers.DATP)
+cell_singscore <- cbind(cell_singscore, DATP = scoredf$TotalScore)
+```
+
+## Get score AT1
+```{r}
+markers.AT1 <- read.csv("Signature/Markers_AT1.csv")
+markers.AT1 <- markers.AT1$X[1:20]
+
+rankData <- rankGenes(Norm_exprMat)
+scoredf <- simpleScore(rankData, upSet = markers.AT1)
+
+cell_singscore <- cbind(cell_singscore, AT1 = scoredf$TotalScore)
+```
+
+
+# Write csv file for singscore
+```{r}
+rownames(cell_singscore) <- colnames(Norm_exprMat)
+
+#write.csv(cell_singscore, "Score_Epithelial.csv")
+```
+
+# plotting score in pheatmap
+```{r fig.width=8, fig.height=5}
+annotation_sample <- read_excel("../Data_Thomas/Q3 - publication - V2.xlsx", sheet = "SegmentProperties")
+singscores <- cell_singscore
+singscores <- merge(singscores, annotation_sample[,c(5,25)], by.x = "row.names", by.y = "SegmentDisplayName")
+singscores <- singscores[order(singscores$Group),]
+singscores$Group<- NULL
+
+rownames(singscores) <- singscores$Row.names
+singscores$Row.names <- NULL
+
+df <- as.data.frame(annotation_sample[,c(5,25)])
+df$Group <- as.factor(df$Group)
+levels(df$Group) <- c( "Extralesional", "Intralesional", "Perilesional", "Control")
+rownames(df)<-df$SegmentDisplayName
+df$SegmentDisplayName <- NULL
+
+
+pheatmap_singscore<- pheatmap(t(singscores), cluster_rows=FALSE, show_rownames=T,
+         cluster_cols=F, scale = "row", annotation_col=df, main = "Singscores", labels_row = c("AT2", "Primed AT2", "DATP", "AT1"), color = colorRampPalette(c("blue", "white", "red"))(100))
+```
+
+
+```{r}
+sessionInfo()
+```
+
