@@ -1,0 +1,198 @@
+---
+title: "SCENIC"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 2
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading packages
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(SCENIC)) 
+suppressMessages(library(ComplexHeatmap))
+suppressMessages(library(AUCell))
+suppressMessages(library(stringr))
+```
+
+# Loading data
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+cells.combined <- readRDS("../8.2-Scoring_Ly6G_Macs/cells.combined_Part2.rds")
+```
+
+# Prepare cellinfo and Expression matrix
+```{r, eval = FALSE}
+exprMat <- cells.combined@assays$RNA@data
+cellInfo <- data.frame(seuratCluster=Idents(cells.combined))
+#cellInfo$Merge_annotation <- cells.combined$Merge_annotation
+cellInfo$nGene <- colSums(exprMat>0)
+
+dir.create ("int")
+saveRDS(exprMat, file = "int/exprMat.Rds")
+saveRDS(cellInfo, file = "int/cellInfo.Rds")
+```
+
+# Download Species-specific databases
+In addition to the R-packages, you will need to download the species-specific databases for RcisTarget (the motif rankings). By default, SCENIC uses the databases that score the motifs in the promoter of the genes (up to 500bp upstream the TSS), and in the 20kb around the TSS (+/-10kbp).
+```{r, eval = FALSE}
+dbFiles <- c("https://resources.aertslab.org/cistarget/databases/old/homo_sapiens/hg19/refseq_r45/mc9nr/gene_based/hg19-500bp-upstream-7species.mc9nr.feather",
+"https://resources.aertslab.org/cistarget/databases/old/homo_sapiens/hg19/refseq_r45/mc9nr/gene_based/hg19-tss-centered-10kb-7species.mc9nr.feather")
+
+dir.create("cisTarget_databases");
+setwd("cisTarget_databases") 
+for(featherURL in dbFiles)
+{
+  download.file(featherURL, destfile=basename(featherURL)) # saved in current dir
+}
+```
+
+
+# Initialise Scenic
+```{r, eval = FALSE}
+exprMat <- readRDS("int/exprMat.Rds")
+cellInfo <- readRDS("int/cellInfo.Rds")
+
+data(list="motifAnnotations_hgnc_v9", package="RcisTarget")
+motifAnnotations_hgnc <- motifAnnotations_hgnc_v9
+
+org <- "hgnc"
+dbDir <- "cisTarget_databases"
+dbDir <- path.expand(dbDir)
+myDatasetTitle <- "SCENIC Analysis"
+data(defaultDbNames)
+dbs <- defaultDbNames[[org]]
+scenicOptions <- initializeScenic(org=org, dbDir=dbDir, dbs=dbs, nCores=25) 
+```
+
+# Gene filtering
+1. Filter by the total number of reads per gene. Keeps only the genes with at least 6 UMI counts across all samples.
+
+2. Filter by the number of cells in which the gene is detected. 
+```{r, eval = FALSE}
+exprMat <- as.matrix(exprMat) # need a regulat matrix
+genesKept <- geneFiltering(exprMat, scenicOptions=scenicOptions,
+                           minCountsPerGene=3*.01*ncol(exprMat),
+                           minSamples=ncol(exprMat)*.01)
+
+dim(exprMat) 
+exprMat_filtered <- exprMat[genesKept, ]
+dim(exprMat_filtered) 
+```
+
+
+# Correlation
+```{r, eval = FALSE}
+runCorrelation(exprMat_filtered, scenicOptions)
+```
+
+## Genie3
+This step is time consuming
+```{r, eval = FALSE}
+runGenie3(exprMat_filtered, scenicOptions)
+```
+
+## Build and score the GRN
+```{r, eval = FALSE}
+scenicOptions@settings$verbose <- TRUE
+scenicOptions@settings$nCores <- 10
+scenicOptions@settings$seed <- 123
+
+runSCENIC_1_coexNetwork2modules(scenicOptions)
+runSCENIC_2_createRegulons(scenicOptions)
+runSCENIC_3_scoreCells(scenicOptions, exprMat_filtered)
+```
+
+# Plotting the results
+
+## Viewing markers based on specificity score
+```{r, eval = FALSE}
+regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC") # require file int/3.4_regulonAUC.Rds
+
+rss <- calcRSS(AUC=getAUC(regulonAUC), cellAnnotation=cellInfo[colnames(regulonAUC), "seuratCluster"])
+
+rssPlot <- plotRSS(rss)
+plotly::ggplotly(rssPlot$plot)
+```
+
+
+
+
+# Plotting cMaf et Mafb
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+regulonAUC <- readRDS("int/3.4_regulonAUC.Rds")
+
+names <- c("MAFB (27g)", "MAF (104g)")
+regulonAUC.mat <- regulonAUC@assays@data@listData$AUC
+Subset_regulonActivity <-regulonAUC.mat[names,]
+
+
+regulonActivity_byCellType_Scaled <- t(scale(t(Subset_regulonActivity), center = T, scale=T))
+
+color_clusters <- c("#0080FF", "#1d1352", "#008000", "#C0C0C0", "#0000FF", "beige", "#FF00FF", "#804000", "#FFFF00", "#008080", "#00FFFF", "#800000", "#FF8000", "#00FF00", "#8000FF", "#80FF00", "#FF0000", "#FF0080", "#000000")
+
+df <- as.data.frame(cells.combined$Merge_annotation)
+colnames(df) <- "Merge_annotation"
+
+color_df <- list(Merge_annotation = c("C1 - AM" = "#0080FF", 
+                              "C2 - AM" = "#1d1352", 
+                              "C3 - AM" = "#008000", 
+                              "C4 - AM" = "#C0C0C0", 
+                              "C5 - AM" = "#0000FF", 
+                              "C6 - AM" = "beige", 
+                              "C7 - AM" = "#FF00FF", 
+                              "C8 - Mono" = "#804000", 
+                              "C9 - Mo-Mac" = "#FFFF00", 
+                              "C10 - Mo-DC" = "#008080", 
+                              "C11 - Neutro" = "#00FFFF",
+                              "C12 - LT" = "#800000",
+                              "C13 - LT" = "#FF8000",
+                              "C14 - LT" = "#00FF00",
+                              "C15 - LT" = "#8000FF",
+                              "C16 - LT" = "#80FF00",
+                              "C17 - DC" = "#FF0000",
+                              "C18 - Mast" = "#FF0080",
+                              "C19 - Epith" = "#000000"))
+
+Heatmap <- Heatmap(regulonActivity_byCellType_Scaled, name="Regulon activity", show_column_names = FALSE, 
+        column_split = factor(cells.combined$Merge_annotation),
+        cluster_column_slices = F,
+        cluster_rows = F,
+        top_annotation = HeatmapAnnotation(df = df, col = color_df),
+        show_column_dend = F,
+        column_title_rot = 90)
+
+#tidyHeatmap::save_pdf(Heatmap,"Scenic_cMAFf&MAFB.pdf", width = 40, height = 10, units = "cm")
+```
+
+
+```{r fig.width=15, fig.height=4}
+Heatmap
+```
+
+
+```{r}
+sessionInfo()
+```
+

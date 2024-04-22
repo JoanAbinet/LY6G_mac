@@ -1,0 +1,158 @@
+---
+title: "Loading Human scRNAseq V1 V2"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 2
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading packages
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dittoSeq))
+```
+
+# Loading 10X V1
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+# the data can be downloaded on GEO
+all_dirs <- list.dirs(path = "Data", full.names = TRUE, recursive = F)
+
+list_sample_name <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4")
+
+list_sample <- list()
+for (i in 1:(length(all_dirs)/2)) {
+  
+  Seq_raw_file <- Read10X(data.dir = all_dirs[i])
+  Seurat_file <- CreateSeuratObject(counts = Seq_raw_file, project = list_sample_name[i], min.cells = 3, min.features =   200)
+  list_sample <- append(list_sample, Seurat_file)
+}
+list_sample
+
+V1_10x <- merge(list_sample[[1]], y = list_sample[-1], add.cell.ids = c("1","2","3", "4"), project = "bronchoalveolar_lavage")
+```
+
+
+## Quality control
+```{r}
+V1_10x[["percent.mt"]] <- PercentageFeatureSet(V1_10x, pattern = "^MT-")# MT : human cells
+VlnPlot(V1_10x, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1)
+```
+
+## Normalisation + scalin
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+V1_10x <- subset(V1_10x, subset = nFeature_RNA > 200 & nFeature_RNA < 6000 & percent.mt < 5) 
+
+V1_10x <- NormalizeData(V1_10x, normalization.method = "LogNormalize", scale.factor = 10000)
+V1_10x <- FindVariableFeatures(V1_10x, selection.method = "vst", nfeatures = 2000) 
+
+all.genes <- rownames(V1_10x)
+V1_10x <- ScaleData(V1_10x, features = all.genes)
+
+V1_10x <- RunPCA(V1_10x, features = VariableFeatures(object = V1_10x))
+```
+
+
+# Loading 10X V2
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+# the data can be downloaded on GEO
+all_dirs <- list.dirs(path = "Data", full.names = TRUE, recursive = F)
+
+list_sample_name <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4","Sample_5", "Sample_6", "Sample_7", "Sample_8")
+
+list_sample <- list()
+for (i in 5:length(all_dirs)) {
+  
+  print(all_dirs[i])
+  Seq_raw_file <- Read10X(data.dir = all_dirs[i])
+  Seurat_file <- CreateSeuratObject(counts = Seq_raw_file, project = list_sample_name[i], min.cells = 3, min.features =   200)
+  list_sample <- append(list_sample, Seurat_file)
+}
+list_sample
+
+V2_10x <- merge(list_sample[[1]], y = list_sample[-1], add.cell.ids = c("1","2","3", "4"), project = "bronchoalveolar_lavage")
+```
+
+## Quality control
+```{r}
+V2_10x[["percent.mt"]] <- PercentageFeatureSet(V2_10x, pattern = "^MT-")# MT : human cells
+VlnPlot(V2_10x, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0.1)
+```
+
+## Normalisation + scalin
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+V2_10x <- subset(V2_10x, subset = nFeature_RNA > 400 & nCount_RNA > 800 & nFeature_RNA < 8000 & percent.mt < 5) 
+
+V2_10x <- NormalizeData(V2_10x, normalization.method = "LogNormalize", scale.factor = 10000)
+V2_10x <- FindVariableFeatures(V2_10x, selection.method = "vst", nfeatures = 2000) 
+
+all.genes <- rownames(V2_10x)
+V2_10x <- ScaleData(V2_10x, features = all.genes)
+
+V2_10x <- RunPCA(V2_10x, features = VariableFeatures(object = V2_10x))
+```
+
+# Integration
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+seurat_list <- list(V1_10x, V2_10x)
+
+features <- SelectIntegrationFeatures(object.list = seurat_list)
+
+cells.anchors <- FindIntegrationAnchors(object.list = seurat_list, anchor.features = features, reduction = "rpca")
+cells.combined <- IntegrateData(anchorset = cells.anchors)
+
+cells.combined <- ScaleData(cells.combined, verbose = FALSE)
+cells.combined <- RunPCA(cells.combined, npcs = 30, verbose = FALSE)
+
+cells.combined <- RunUMAP(cells.combined, reduction = "pca", dims = 1:16)
+cells.combined <- FindNeighbors(cells.combined, reduction = "pca", dims = 1:16)
+cells.combined <- FindClusters(cells.combined, resolution = 0.9) 
+```
+
+Seurat doesn't allow us recreate the umap in a reproductible way in this repository. A previous embedding need to be loaded. However, the clustering was not affected.
+
+```{r}
+cells.combined <- subset(cells.combined, seurat_clusters %in% 19, invert = T)
+
+Umap_embedding <- read.csv("umap_coordinate.csv", row.names = 1, header = T)
+
+cells.combined@reductions$umap@cell.embeddings <- as.matrix(Umap_embedding)
+```
+
+# Umap
+```{r fig.width=7, fig.height=5, message=FALSE, warning=FALSE, results= "hide"}
+DimPlot(cells.combined, reduction = "umap", label = T)
+```
+
+# Saving Data
+```{r}
+saveRDS(cells.combined, "cells.combined_Part1.rds")
+```
+
+
+```{r}
+sessionInfo()
+```
+
