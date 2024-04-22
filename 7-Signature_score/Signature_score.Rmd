@@ -1,0 +1,129 @@
+---
+title: "Signature Scoring"
+author: "Abinet Joan"
+date: "`r format (Sys.time(), format='%Y-%m-%d %H:%M:%S %z')`"
+output:
+  pdf_document: 
+    toc: true
+    toc_depth: 2
+  html_document: default
+header-includes:
+  - |
+    ```{=latex}
+    \usepackage{fvextra}
+    \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+      breaksymbolleft={}, 
+      showspaces = false,
+      showtabs = false,
+      breaklines,
+      commandchars=\\\{\}
+    }
+    ```
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading packages
+```{r}
+suppressMessages(library(dplyr))
+suppressMessages(library(Seurat))
+suppressMessages(library(patchwork))
+suppressMessages(library(ggplot2))
+suppressMessages(library(RColorBrewer))
+suppressMessages(library(stringr))
+```
+
+# Loading data
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_cells_clustered <- readRDS("../3-Visualisation_Clustering/Myeloid_cells_Final.rds")
+
+colors <- c("#B2DF8A","#ABD61C","#1F78B4","#A6CEE3", "#E31A1C","#E3751C","#600078", "#33A02C", "#FDBF6F", "#526317",  "#D4AAC6", "#784620")
+```
+
+# Testing for M2 signature
+M2 signatures (gene downregulated in M1 vs M2)
+https://www.gsea-msigdb.org/gsea/msigdb/mouse/geneset/COATES_MACROPHAGE_M1_VS_M2_DN.html?keywords=macrophage
+
+## Loading signature
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+M2_sigDatabase <- read.table("M1-M2_signature/COATES_MACROPHAGE_M1_VS_M2_DN.v2023.2.Mm.tsv", sep = "\t")
+
+M2_signatures <- M2_sigDatabase[18,2]
+
+M2_signatures <- strsplit(M2_signatures, ",")[[1]]
+
+M2_signatures <- M2_signatures[M2_signatures != ""]
+
+M2_signatures <- unique(M2_signatures)
+```
+
+## Testing signature
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+DefaultAssay(myeloid_cells_clustered) <- "RNA"
+myeloid_cells_clustered <- AddModuleScore(myeloid_cells_clustered,
+                  features = list(M2_signatures),
+                  name="M2")
+```
+
+```{r, fig.width=6, fig.height=4}
+VlnPlot(myeloid_cells_clustered, features = "M21", cols = colors , pt.size= 0, group.by = "CellType")+ ggtitle("")
+#ggsave("Signature_M2_vln.pdf", height = 12 , width = 19, units = "cm")
+```
+
+# Testing for M1 signature
+M1 signatures (gene downregulated in M1 vs M2)
+https://www.gsea-msigdb.org/gsea/msigdb/mouse/geneset/COATES_MACROPHAGE_M1_VS_M2_DN.html?keywords=macrophage
+
+## Loading signature
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+M1_sigDatabase <- read.table("M1-M2_signature/COATES_MACROPHAGE_M1_VS_M2_UP.v2023.2.Mm.tsv", sep = "\t")
+
+M1_signatures <- M1_sigDatabase[18,2]
+
+M1_signatures <- strsplit(M1_signatures, ",")[[1]]
+
+M1_signatures <- M1_signatures[M1_signatures != ""]
+
+M1_signatures <- unique(M1_signatures)
+```
+
+## Testing signature
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+myeloid_cells_clustered <- AddModuleScore(myeloid_cells_clustered,
+                  features = list(M1_signatures),
+                  name="M1")
+
+```
+
+```{r, fig.width=6, fig.height=4}
+VlnPlot(myeloid_cells_clustered, features = "M11", cols = colors , pt.size= 0, group.by = "CellType")+ ggtitle("")
+#ggsave("Signature_M1_vln.pdf", height = 12 , width = 19, units = "cm")
+```
+
+
+# Signature satM
+```{r, message=FALSE, warning=FALSE, results= "hide"}
+signature_satM <- c("Csf1r", "Lyz1", "Lyz2", "Cd68", "Cd14", "Cybb", "Itgb2", "Mpo", "Elane", "Prtn3", "Csf2ra", "Lyz11","Cybb1", "Fes", "Ltf", "Prg2", "Epx", "Ear1", "Ear2", "Ear3")
+
+myeloid_cells_clustered <- AddModuleScore(myeloid_cells_clustered,
+                  features = list(signature_satM),
+                  name="satM")
+```
+
+```{r, fig.width=6, fig.height=4}
+FeaturePlot(myeloid_cells_clustered, features = "satM1", label = T, pt.size = 0.8) +
+            scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "RdBu")))
+#ggsave("Signature_satM.pdf", width = 9, height = 6)
+```
+
+```{r, fig.width=6, fig.height=4}
+VlnPlot(myeloid_cells_clustered, features = "satM1", cols = colors , pt.size= 0, group.by = "CellType")
+#ggsave("Signature_Satm_vln.pdf", height = 12 , width = 19, units = "cm")
+```
+
+
+```{r}
+sessionInfo()
+```
